@@ -40,7 +40,7 @@ def main() -> None:
     # The address for sending UDP packets back into the nEmulator
     nemu_addr = (args.emulator_host, args.emulator_ack_port)
 
-    # UDP socket to receive packets sent via the nEmulator
+    # UDP socket to send/receive packets via the nEmulator
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind(('', args.receiver_data_port))
 
