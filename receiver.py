@@ -85,10 +85,14 @@ def main() -> None:
 
         # check if seqnum is not the expected one
         if exp_seqnum != recv_packet.seqnum: 
-            # if seqnum is within next 10 sequence numbers, 
-            # store recv_packet in buffer
-            if utils.seqnum_diff(exp_seqnum, recv_packet.seqnum) <= 10: 
-                pkt_buffer.append(recv_packet)
+            # store recv_packet in buffer if: 
+            # - seqnum is within next 10 sequence numbers
+            # - and the seqnum is not already in buffer 
+            if (
+                utils.seqnum_diff(exp_seqnum, recv_packet.seqnum) <= 10
+                and recv_packet.seqnum not in pkt_buffer
+            ): 
+                pkt_buffer[recv_packet.seqnum] = recv_packet
             # otherwise, discard the packet 
 
             # in both cases, send ACK for most recently received in-order packet
