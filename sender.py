@@ -72,6 +72,30 @@ class Sender:
         self.rtt_timer = Timer(0.1, self.rtt_handler) # RTT is approx 100 ms
         self.rtt_timer.start() # start initial RTT at start of program
 
+        # log files 
+        self.seqnum_log = open('seqnum.log', 'w')
+        self.ack_log = open('ack.log', 'w')
+        self.N_log = open('N.log', 'w')
+
+        # timestamp for logging 
+        self.timestamp = 0
+
+    def write_log(self, log, data) -> None: 
+        """
+        helper for writing to log with timestamp 
+        precondition: lock is acquired by caller
+        """
+        log.write(f't={self.timestamp} {data}\n')
+
+    def set_wnd_size(self, wnd_size) -> None: 
+        """
+        sets wnd_size and updates N.log if value of N changes
+        precondition: lock is acquired by caller
+        """
+        if self.wnd_size != wnd_size: 
+            self.write_log(self.N_log, wnd_size)
+            self.wnd_size = wnd_size
+
 
     def load_packets(self, input_file: str) -> list[Packet]:
         """
@@ -102,30 +126,32 @@ class Sender:
         handles at the end of every RTT timer tick for ECN feedback control
         cleans the timer and terminates if we are past data-transmission stage
         """
-        if self.done_data_trans_stage: 
+        with self.lock: 
+            if self.done_data_trans_stage: 
+                self.rtt_timer.cancel()
+                return 
+
+            # update timestamp for logs 
+            self.timestamp += 1
+
+            if self.acked_in_rtt > 0: 
+                # compute fraction of marked packets received at receiver
+                F = self.marked_in_rtt/self.acked_in_rtt
+
+                # update with exp. weighted moving average
+                self.alpha = (1 - 0.0625) * self.alpha + 0.0625 * F
+
+                # ECN-based multiplicative decrease 
+                self.cwnd = self.cwnd * (1 - self.alpha / 2)
+
+                # update windowsize N and write to N_log
+                self.set_wnd_size(min(10, max(1, floor(self.cwnd))))
+
+            # reset RTT timer and state 
+            self.acked_in_rtt = 0 
+            self.marked_in_rtt = 0 
             self.rtt_timer.cancel()
-            return 
-
-        if self.acked_in_rtt <= 0: 
-            return # do nothing if acked_in_rtt > 0 
-
-        # compute fraction of marked packets received at receiver
-        F = self.marked_in_rtt/self.acked_in_rtt
-
-        # update with exp. weighted moving average
-        self.alpha = (1 - 0.0625) * self.alpha + 0.0625 * F
-
-        # ECN-based multiplicative decrease 
-        self.cwnd = self.cwnd * (1 - self.alpha / 2)
-
-        # update windowsize N 
-        self.wnd_size = min(10, max(1, floor(self.cwnd)))
-
-        # reset RTT timer and state 
-        self.acked_in_rtt = 0 
-        self.marked_in_rtt = 0 
-        self.rtt_timer.cancel()
-        self.rtt_timer = Timer(0.1, self.rtt_handler)
+            self.rtt_timer = Timer(0.1, self.rtt_handler)
 
 
     def num_inflight(self) -> int:
@@ -143,8 +169,11 @@ class Sender:
             if self.done_data_trans_stage: 
                 return  # do nothing if finished data_trans stage
             
+            # update timestamp for logs 
+            self.timestamp += 1
+
             # otherwise, update the window state and mark packets as lost
-            self.wnd_size = 1
+            self.set_wnd_size(1)  # update N and log if changed
             self.cwnd = 1.0
             self.unsent_ind = self.acked_ind + 1
 
@@ -234,7 +263,7 @@ class Sender:
 
                 # 3. additive increase cwnd and N (i.e. wnd_size)
                 self.cwnd = self.cwnd + 1.0 / self.cwnd
-                self.wnd_size = min(10, max(1, floor(self.cwnd)))
+                self.set_wnd_size(min(10, max(1, floor(self.cwnd))))
 
                 # 4. update ECN feedback variables
                 self.acked_in_rtt += (pkt.seqnum - self.prev_seqnum + utils.MOD_SIZE) % utils.MOD_SIZE
