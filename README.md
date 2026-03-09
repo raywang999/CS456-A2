@@ -38,3 +38,5 @@ python3 sender.py localhost 9994 9992 input.txt
 
 ## Assumptions
 - For simplicity and more insightful logs, a "new packet" count may include retransmissions.
+- technically assignment didn't specify what to on inflight packets when when window shrinks due to ECN feedback. 
+    - I made it drop inflight packets outside the new window

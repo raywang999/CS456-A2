@@ -94,10 +94,13 @@ class Sender:
         """
         sets wnd_size and updates N.log if value of N changes
         precondition: lock is acquired by caller
+        postcondition: if window shrinks, then updates unsent_ind as required
         """
         if self.wnd_size != wnd_size: 
             self.write_log(self.N_log, wnd_size)
             self.wnd_size = wnd_size
+            # retransmit packets outside of the new window
+            self.unsent_ind = min(self.unsent_ind, self.acked_ind + wnd_size)
 
     def send_packet(self, pkt: Packet) -> None: 
         """
@@ -189,7 +192,6 @@ class Sender:
             # otherwise, update the window state and mark packets as lost
             self.set_wnd_size(1)  # update N and log if changed
             self.cwnd = 1.0
-            self.unsent_ind = self.acked_ind + 1
 
             # resend oldest un-ACK'd packet if it exists 
             if self.unsent_ind < self.num_packets_to_send:
