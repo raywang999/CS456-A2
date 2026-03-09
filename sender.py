@@ -326,11 +326,16 @@ class Sender:
 
         self.sock.close()
 
+    def flush_logs(self) -> None: 
+        for log_f in (self.N_log, self.ack_log, self.seqnum_log):
+            log_f.flush()
+
 
 def main() -> None:
     args = parse_args()
     sender = Sender(args)
     sender.run()
+    sender.flush_logs()
 
 
 if __name__ == "__main__":
