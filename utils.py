@@ -23,7 +23,7 @@ def seqnum_diff(prv: int, nxt: int) -> int:
 # End of Transmission Packet 
 EOT_PKT = Packet(
     PACKET_TYPE_EOT, 
-    0, # unused for EOT
+    0, # seqnum is 0, will be modified by sender
     0, # unused for EOT
     0, # unused for EOT
     0, # unused for EOT

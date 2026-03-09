@@ -100,7 +100,12 @@ class Sender:
     def rtt_handler(self) -> None:
         """
         handles at the end of every RTT timer tick for ECN feedback control
+        cleans the timer and terminates if we are past data-transmission stage
         """
+        if self.done_data_trans_stage: 
+            self.rtt_timer.cancel()
+            return 
+
         if self.acked_in_rtt <= 0: 
             return # do nothing if acked_in_rtt > 0 
 
@@ -256,18 +261,17 @@ class Sender:
         ack_thread.join()
 
         # Connection termination stage.
-        self.sock.sendto(utils.EOT_PKT.encode(), self.nemu_addr)
+        # send EOT packet with correct seqnum 
+        eot_pkt = utils.EOT_PKT 
+        eot_pkt.seqnum = self.num_packets_to_send % utils.MOD_SIZE
+        self.sock.sendto(eot_pkt.encode(), self.nemu_addr)
 
         # loop incase of out-of-order ACKs 
         while True:
-            eot_pkt, _ = self.sock.recvfrom(1024)
-            if Packet(eot_pkt).typ == utils.PACKET_TYPE_EOT:
+            recv_pkt, _ = self.sock.recvfrom(1024)
+            if Packet(recv_pkt).typ == utils.PACKET_TYPE_EOT:
                 break
 
-        with self.lock:
-            if self.pkt_loss_timer is not None:
-                self.pkt_loss_timer.cancel()
-                self.pkt_loss_timer = None
         self.sock.close()
 
 
