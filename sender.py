@@ -80,6 +80,9 @@ class Sender:
         # timestamp for logging 
         self.timestamp = 0
 
+        # initial log the window to be 1
+        self.write_log(self.N_log, 1)
+
     def write_log(self, log, data) -> None: 
         """
         helper for writing to log with timestamp 
