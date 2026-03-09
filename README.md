@@ -1,16 +1,19 @@
 # Terminal 1: start network emulator
+- on `ubuntu2404-002.student.cs.uwaterloo.ca` run
 ```bash
-python3 network_emulator.py 9991 localhost 9994 9993 localhost 9992 0.05 10 1
+python3 network_emulator.py 6101 ubuntu2404-004.student.cs.uwaterloo.ca 6104 6103 ubuntu2404-006.student.cs.uwaterloo.ca 6102 0.05 10 1
 ```
 
-# Terminal 2: start receiver
+# Terminal 2: start receiver 
+- on `ubuntu2404-004.student.cs.uwaterloo.ca` run 
 ```bash
-python3 receiver.py localhost 9993 9994 output.txt
+python3 receiver.py ubuntu2404-002.student.cs.uwaterloo.ca 6103 6104 output.txt
 ```
 
 # Terminal 3: start sender
+- on `ubuntu2404-006.student.cs.uwaterloo.ca` run 
 ```bash
-python3 sender.py localhost 9991 9992 input.txt
+python3 sender.py ubuntu2404-002.student.cs.uwaterloo.ca 6101 6102 input.txt
 ```
 
 

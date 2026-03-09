@@ -5,7 +5,9 @@ from packet import Packet
 
 VALID_HOSTNAMES = (
     "localhost",
+    "ubuntu2404-002.student.cs.uwaterloo.ca",
     "ubuntu2404-004.student.cs.uwaterloo.ca",
+    "ubuntu2404-006.student.cs.uwaterloo.ca",
 )
 
 

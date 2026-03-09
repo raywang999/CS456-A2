@@ -169,6 +169,7 @@ class Sender:
             self.marked_in_rtt = 0 
             self.rtt_timer.cancel()
             self.rtt_timer = Timer(0.1, self.rtt_handler)
+            self.rtt_timer.start()
 
 
     def num_inflight(self) -> int:
