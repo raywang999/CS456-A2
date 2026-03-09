@@ -62,10 +62,12 @@ class Sender:
         self.done_data_trans_stage = False
         self.lock = Lock()
 
-        self.alpha = 0 # \alpha used for ecn_feedback
+        # ECN feedback variables         
+        self.alpha = 0.0 
         self.prev_ce_count = 0
         self.acked_in_rtt = 0 
         self.marked_in_rtt = 0 
+        self.prev_seqnum = 31
         # timer used for ECN feedback 
         self.rtt_timer = Timer(0.1, self.rtt_handler) # RTT is approx 100 ms
         self.rtt_timer.start() # start initial RTT at start of program
@@ -97,8 +99,29 @@ class Sender:
     
     def rtt_handler(self) -> None:
         """
-        handles RTT timer interrupts for ECN feedback control
+        handles at the end of every RTT timer tick for ECN feedback control
         """
+        if self.acked_in_rtt <= 0: 
+            return # do nothing if acked_in_rtt > 0 
+
+        # compute fraction of marked packets received at receiver
+        F = self.marked_in_rtt/self.acked_in_rtt
+
+        # update with exp. weighted moving average
+        self.alpha = (1 - 0.0625) * self.alpha + 0.0625 * F
+
+        # ECN-based multiplicative decrease 
+        self.cwnd = self.cwnd * (1 - self.alpha / 2)
+
+        # update windowsize N 
+        self.wnd_size = min(10, max(1, floor(self.cwnd)))
+
+        # reset RTT timer and state 
+        self.acked_in_rtt = 0 
+        self.marked_in_rtt = 0 
+        self.rtt_timer.cancel()
+        self.rtt_timer = Timer(0.1, self.rtt_handler)
+
 
     def num_inflight(self) -> int:
         """
@@ -208,7 +231,11 @@ class Sender:
                 self.cwnd = self.cwnd + 1.0 / self.cwnd
                 self.wnd_size = min(10, max(1, floor(self.cwnd)))
 
-                # 4. update ecn_feedback variables and N
+                # 4. update ECN feedback variables
+                self.acked_in_rtt += (pkt.seqnum - self.self.prev_seqnum + utils.MOD_SIZE) % utils.MOD_SIZE
+                self.marked_in_rtt += pkt.ce_count - self.prev_ce_count
+                self.prev_ce_count = pkt.ce_count
+                self.prev_seqnum = pkt.seqnum
 
 
     def run(self) -> None:
