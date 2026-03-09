@@ -34,6 +34,9 @@ def main() -> None:
     # open file for output
     out_f = open(args.output_file, 'w') 
 
+    # open file for logging 
+    log_f = open('arrival.log', 'w')
+
     # The address for sending UDP packets back into the nEmulator
     nemu_addr = (args.emulator_host, args.emulator_ack_port)
 
@@ -71,6 +74,14 @@ def main() -> None:
         # read and decode packet from socket 
         data, _ = sock.recvfrom(1024)
         recv_packet = Packet(data)
+
+        # log packet on arrival. 
+        if recv_packet.typ == utils.PACKET_TYPE_DATA: 
+            # log seqnum and ecn field 
+            log_f.write(f'{recv_packet.seqnum} {recv_packet.ecn}\n')
+        if recv_packet.typ == utils.PACKET_TYPE_EOT: 
+            # log "EOT" 
+            log_f.write("EOT\n")
 
         # check if seqnum is not the expected one
         if exp_seqnum != recv_packet.seqnum: 
