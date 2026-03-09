@@ -108,15 +108,7 @@ def main() -> None:
         while cur_pkt is not None:  
             # 1. check if EOT. if so, send back EOT and terminate 
             if cur_pkt.typ == utils.PACKET_TYPE_EOT: 
-                eot_pkt = Packet(
-                    utils.PACKET_TYPE_EOT, 
-                    0, # unused for EOT
-                    0, # unused for EOT
-                    0, # unused for EOT
-                    0, # unused for EOT
-                    "", # unused for EOT
-                )
-                sock.sendto(eot_pkt.encode(), nemu_addr)
+                sock.sendto(utils.EOT_PKT.encode(), nemu_addr)
                 return
 
             # 2. otherwise, write data to output file 

@@ -19,3 +19,13 @@ MOD_SIZE = 32
 
 def seqnum_diff(prv: int, nxt: int) -> int: 
     return (nxt - prv + MOD_SIZE) % MOD_SIZE
+
+# End of Transmission Packet 
+EOT_PKT = Packet(
+    PACKET_TYPE_EOT, 
+    0, # unused for EOT
+    0, # unused for EOT
+    0, # unused for EOT
+    0, # unused for EOT
+    "", # unused for EOT
+)
