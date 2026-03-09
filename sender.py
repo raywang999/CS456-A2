@@ -251,6 +251,11 @@ class Sender:
             pkt = Packet(recv_msg)
             assert pkt.typ == utils.PACKET_TYPE_ACK, "sender only expects ACK"
 
+            # update timestamp since event occurred 
+            self.timestamp += 1
+            # log to ack.log 
+            self.write_log(self.ack_log, f'{pkt.seqnum} {pkt.ce_count}')
+
             with self.lock:
                 # check if ACK'd seqnum is in window of inflight packets
                 acked_seqnum = self.acked_ind % utils.MOD_SIZE

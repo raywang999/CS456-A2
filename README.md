@@ -17,5 +17,24 @@ python3 receiver.py localhost 9993 9994 output.txt
 python3 sender.py localhost 9991 9992 input.txt
 ```
 
-## Assumptions 
-- for simplicity and more insightful logs, I assumed a 'new packet' sent also includes retransmitting lost packets
+### Check transfer correctness
+```bash
+cmp -s input.txt output.txt && echo "PASS: files match" || echo "FAIL: files differ"
+```
+
+## Run without emulator (direct, zero added delay)
+
+Use 2 terminals and skip `network_emulator.py`.
+
+### Terminal 1: start receiver
+```bash
+python3 receiver.py localhost 9992 9994 output.txt
+```
+
+### Terminal 2: start sender
+```bash
+python3 sender.py localhost 9994 9992 input.txt
+```
+
+## Assumptions
+- For simplicity and more insightful logs, a "new packet" count may include retransmissions.
