@@ -201,7 +201,7 @@ class Sender:
             # wait for an ACK packet 
             recv_msg, _ = self.sock.recvfrom(1024)
             pkt = Packet(recv_msg)
-            assert pkt.typ != utils.PACKET_TYPE_ACK, "sender only expects ACK"
+            assert pkt.typ == utils.PACKET_TYPE_ACK, "sender only expects ACK"
 
             with self.lock:
                 # check if ACK'd seqnum is in window of inflight packets
@@ -232,7 +232,7 @@ class Sender:
                 self.wnd_size = min(10, max(1, floor(self.cwnd)))
 
                 # 4. update ECN feedback variables
-                self.acked_in_rtt += (pkt.seqnum - self.self.prev_seqnum + utils.MOD_SIZE) % utils.MOD_SIZE
+                self.acked_in_rtt += (pkt.seqnum - self.prev_seqnum + utils.MOD_SIZE) % utils.MOD_SIZE
                 self.marked_in_rtt += pkt.ce_count - self.prev_ce_count
                 self.prev_ce_count = pkt.ce_count
                 self.prev_seqnum = pkt.seqnum

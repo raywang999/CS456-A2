@@ -122,10 +122,13 @@ def main() -> None:
             # first update expected seqnum 
             exp_seqnum = (exp_seqnum + 1) % utils.MOD_SIZE
 
-            # if next packet isn't in buffer, exit loop into step 4
+            # if packet is in buffer, remove it and repeat
             cur_pkt = pkt_buffer.get(exp_seqnum)
-            # otherwise, packet is in buffer so remove it and repeat
-            pkt_buffer.pop(exp_seqnum)
+            if cur_pkt is not None: 
+                pkt_buffer.pop(exp_seqnum)
+            # otherwise, exit inner-loop into step 4
+            else: 
+                break
 
         # 4. otherwise, packet with next seqnum DNE in buffer
         # so send back ACK and process next packet
