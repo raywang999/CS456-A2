@@ -127,8 +127,6 @@ def main() -> None:
             if cur_pkt is not None: 
                 pkt_buffer.pop(exp_seqnum)
             # otherwise, exit inner-loop into step 4
-            else: 
-                break
 
         # 4. otherwise, packet with next seqnum DNE in buffer
         # so send back ACK and process next packet
