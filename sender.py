@@ -60,7 +60,7 @@ def main() -> None:
             break
         packets_to_send.append(Packet(
             utils.PACKET_TYPE_DATA, 
-            num_packets_to_send, 
+            num_packets_to_send % utils.MOD_SIZE, 
             len(chunk), 
             0, # ecn will be set by the nemulator 
             0, # unused for data packets 
@@ -69,12 +69,14 @@ def main() -> None:
         num_packets_to_send += 1
 
 
-    # N i.e the current window size 
+    # cwnd - real valued cwnd 
     cwnd = 1 
-    # largest seqnum that was ACK'd 
-    acked_seqnum = -1 
-    # seqnum that should be sent next by sender
-    unsent_seqnum = 0
+    # N i.e the current window size 
+    wnd_size = 1 
+    # largest index s.t. all packets <= acked_ind are ACK'd 
+    acked_ind = -1 
+    # index of next packet that should be sent next by sender
+    unsent_ind = 0
 
     # packet loss timer. None to indicate timer is stopped 
     pkt_loss_timer : Timer | None = None
@@ -83,22 +85,29 @@ def main() -> None:
     # lock for the window variables and pkt_loss_timer
     lock = Lock()
 
+    def num_inflight() -> None: 
+        """
+        precondition: lock is acquired by caller 
+        return: number of inflight packets 
+        """
+        return unsent_ind - acked_ind - 1 
 
     def pkt_loss_handler() -> None: 
         """
-        - sets cwnd = 1 
+        - sets wnd_size = cwnd = 1
         - sends oldest transmitted-but-not-ACK'd packet
         - resets packet loss timer 
         """
         with lock: 
-            cwnd = 1 
+            wnd_size = 1 
+            cwnd = 1
             # timeout inflight packets
-            unsent_seqnum = acked_seqnum + 1
+            unsent_ind = acked_ind + 1
 
             # send oldest trans but not ACK'd packet
-            pkt = packets_to_send[unsent_seqnum]
+            pkt = packets_to_send[unsent_ind]
             sock.sendto(pkt.encode(), nemu_addr)
-            unsent_seqnum += 1
+            unsent_ind += 1
 
             # reset timer
             pkt_loss_timer = Timer(pkt_loss_TO, pkt_loss_handler)
@@ -111,19 +120,61 @@ def main() -> None:
         """
         while True: 
             with lock: 
+                # if all packets are sent, terminate thread 
+                # since we are finished data-transmission stage
+                if acked_ind == num_packets_to_send-1: 
+                    return
+
                 # if available windowsize is too small, try sending later 
-                num_inflight = unsent_seqnum - acked_seqnum - 1
-                if num_inflight >= cwnd: 
+                if num_inflight() >= cwnd: 
                     time.sleep(0) # thread yield 
                     continue
                 # otherwise, send the packet 
-                pkt = packets_to_send[unsent_seqnum]
-                unsent_seqnum += 1
+                pkt = packets_to_send[unsent_ind]
+                unsent_ind += 1
                 sock.sendto(pkt.encode(), nemu_addr)
 
                 # start packetloss timer if not already started
                 if pkt_loss_timer is None: 
                     pkt_loss_timer = Timer(pkt_loss_TO, pkt_loss_handler)
+
+    
+    def ack_handler() -> None: 
+        """
+        handle incoming ACK packets while we are still in data transmission
+        for ack_handler, this is iff we have un-ACKd packets in queue
+        """
+        while True: 
+            with lock: 
+                if acked_ind == num_packets_to_send-1: 
+                    # terminate thread, we are finished data-transmission stage
+                    return
+                
+                # otherwise, listen for ACK packet 
+                recv_msg, _ = sock.recvfrom(1024) 
+                pkt = Packet(recv_msg) 
+
+                # sender should only receive ACK packets in data-transmission
+                assert pkt.typ == utils.PACKET_TYPE_ACK
+
+                # ignore duplicate ACK (i.e. seqnum is outside inflight range)
+                acked_seqnum = (acked_ind + utils.MOD_SIZE) % utils.MOD_SIZE
+                pkt_diff = utils.seqnum_diff(acked_seqnum, pkt.seqnum)
+                if pkt_diff > num_inflight() or pkt_diff == 0: 
+                    continue # wait for next packet 
+                
+                # otherwise, we received a new ACK. 
+                # 1. update cumulative ACK 
+                acked_ind += pkt_diff 
+                
+                # 2. restart/stop packet loss timer 
+                if num_inflight() == 0 and pkt_loss_timer is not None: 
+                    pkt_loss_timer = None
+                else: 
+
+
+                # 3. additive increase cwnd and N (i.e. wnd_size)
+                # 4. update ecn_feedback variables and N
 
 
 
