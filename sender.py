@@ -96,6 +96,15 @@ class Sender:
             self.write_log(self.N_log, wnd_size)
             self.wnd_size = wnd_size
 
+    def send_packet(self, pkt: Packet) -> None: 
+        """
+        send a data packet via nemulator and log its seqnum 
+        """
+        self.sock.sendto(pkt.encode(), self.nemu_addr)
+        if pkt.typ == utils.PACKET_TYPE_EOT: 
+            self.write_log(self.seqnum_log, "EOT")
+        else: 
+            self.write_log(self.seqnum_log, pkt.seqnum)
 
     def load_packets(self, input_file: str) -> list[Packet]:
         """
@@ -180,8 +189,8 @@ class Sender:
             # resend oldest un-ACK'd packet if it exists 
             if self.unsent_ind < self.num_packets_to_send:
                 pkt = self.packets_to_send[self.unsent_ind]
-                self.sock.sendto(pkt.encode(), self.nemu_addr)
                 self.unsent_ind += 1
+                self.send_packet(pkt)
 
             # reset the timer, cancelling previous one if it exists 
             if self.pkt_loss_timer is not None:
@@ -211,7 +220,7 @@ class Sender:
                 # otherwise, send a packet 
                 pkt = self.packets_to_send[self.unsent_ind]
                 self.unsent_ind += 1
-                self.sock.sendto(pkt.encode(), self.nemu_addr)
+                self.send_packet(pkt)
 
                 # and start the pkt_loss_timer if not already started
                 if self.pkt_loss_timer is None:
@@ -293,7 +302,7 @@ class Sender:
         # send EOT packet with correct seqnum 
         eot_pkt = utils.EOT_PKT 
         eot_pkt.seqnum = self.num_packets_to_send % utils.MOD_SIZE
-        self.sock.sendto(eot_pkt.encode(), self.nemu_addr)
+        self.send_packet(eot_pkt)
 
         # loop incase of out-of-order ACKs 
         while True:
