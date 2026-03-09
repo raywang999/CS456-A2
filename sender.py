@@ -219,8 +219,9 @@ class Sender:
                     self.done_data_trans_stage = True
                     return # terminate the thread 
 
-                # if there's no space in the window to send packets, wait
-                if self.num_inflight() >= self.wnd_size:
+                # wait if there's no space in the window to send packets
+                # or there's no packets left to send 
+                if self.num_inflight() >= self.wnd_size or self.unsent_ind >= self.num_packets_to_send:
                     time.sleep(0) # thread_yield 
                     continue
 
