@@ -16,3 +16,6 @@ python3 receiver.py localhost 9993 9994 output.txt
 ```bash
 python3 sender.py localhost 9991 9992 input.txt
 ```
+
+## Assumptions 
+- for simplicity and more insightful logs, I assumed a 'new packet' sent also includes retransmitting lost packets

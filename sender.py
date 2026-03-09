@@ -104,6 +104,8 @@ class Sender:
         send a data packet via nemulator and log its seqnum 
         """
         self.sock.sendto(pkt.encode(), self.nemu_addr)
+        # event occurred (a packet was sent) so update timestamp
+        self.timestamp += 1 
         if pkt.typ == utils.PACKET_TYPE_EOT: 
             self.write_log(self.seqnum_log, "EOT")
         else: 
