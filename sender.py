@@ -1,9 +1,12 @@
 import argparse
 import socket
-import utils
 import time
+from threading import Lock, Thread, Timer
+
+import utils
 from packet import Packet
-from threading import Lock, Timer, Thread
+from math import floor
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
@@ -29,170 +32,222 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> None:
-    args = parse_args()
+class Sender:
+    def __init__(self, args: argparse.Namespace) -> None:
+        # address used to send packets to nemulator 
+        self.nemu_addr = (args.emulator_host, args.emulator_data_port)
+        
+        # UDP socket used to send/receive packets over nenumlator
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.bind(("", args.sender_ack_port))
 
-    # The address for sending UDP packets into the nEmulator
-    nemu_addr = (args.emulator_host, args.emulator_data_port)
+        # load file into a queue of packets to send 
+        self.packets_to_send = self.load_packets(args.input_file)
+        self.num_packets_to_send = len(self.packets_to_send)
 
-    # UDP socket to send/receive packets from the nEmulator
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind(('', args.sender_ack_port))
+        # real-valued cwnd 
+        self.cwnd = 1.0
+        # N i.e the current window size 
+        self.wnd_size = 1 
+        # largest index s.t. all packets <= acked_ind are ACK'd
+        self.acked_ind = -1
+        # index of next packet that should be sent next by sender
+        self.unsent_ind = 0
 
-    # open input file for reading to send over socket 
-    inp_f = open(args.input_file, 'r')
+        # packet loss timer. None to indicate the timer is stopped 
+        self.pkt_loss_timer: Timer | None = None
+        self.pkt_loss_timeout = 0.3  # 300 ms
 
-    ###########################
-    # data-transmission stage #
-    ###########################
-    # we'll use 4 threads: 
-    # - sender thread that tries to send packets if window allows
-    # - receiver thread that handles incoming ACKs 
-    # - packet-drop timer to update window from packet drop 
-    # - ecn-feedback timer to update window using ce_count
+        # flag for when data transmission stage ends
+        self.done_data_trans_stage = False
+        self.lock = Lock()
 
-    # read file into chunks of length 500 (maximum packet data length)
-    packets_to_send : list[Packet] = []
-    num_packets_to_send = 0
-    while True: 
-        chunk = inp_f.read(500)
-        if chunk == "": 
-            break
-        packets_to_send.append(Packet(
-            utils.PACKET_TYPE_DATA, 
-            num_packets_to_send % utils.MOD_SIZE, 
-            len(chunk), 
-            0, # ecn will be set by the nemulator 
-            0, # unused for data packets 
-            chunk
-        ))
-        num_packets_to_send += 1
+        self.alpha = 0 # \alpha used for ecn_feedback
+        self.prev_ce_count = 0
+        self.acked_in_rtt = 0 
+        self.marked_in_rtt = 0 
+        # timer used for ECN feedback 
+        self.rtt_timer = Timer(0.1, self.rtt_handler) # RTT is approx 100 ms
+        self.rtt_timer.start() # start initial RTT at start of program
 
 
-    # cwnd - real valued cwnd 
-    cwnd = 1 
-    # N i.e the current window size 
-    wnd_size = 1 
-    # largest index s.t. all packets <= acked_ind are ACK'd 
-    acked_ind = -1 
-    # index of next packet that should be sent next by sender
-    unsent_ind = 0
+    def load_packets(self, input_file: str) -> list[Packet]:
+        """
+        read file into chunks of length 500 (maximum packet data length)
+        """
 
-    # packet loss timer. None to indicate timer is stopped 
-    pkt_loss_timer : Timer | None = None
-    pkt_loss_TO = 0.3 # 300 milliseconds 
+        packets: list[Packet] = []
+        with open(input_file, "r", encoding="ascii") as inp_f:
+            packet_index = 0
+            while True:
+                chunk = inp_f.read(500)
+                if chunk == "": # end of file
+                    return packets
+                packets.append(
+                    Packet(
+                        utils.PACKET_TYPE_DATA,
+                        packet_index % utils.MOD_SIZE,
+                        len(chunk),
+                        0, # ecn will be set by the nemulator
+                        0, # ec_count is not set by sender 
+                        chunk,
+                    )
+                )
+                packet_index += 1
     
-    # lock for the window variables and pkt_loss_timer
-    lock = Lock()
-
-    def num_inflight() -> None: 
+    def rtt_handler(self) -> None:
         """
-        precondition: lock is acquired by caller 
-        return: number of inflight packets 
+        handles RTT timer interrupts for ECN feedback control
         """
-        return unsent_ind - acked_ind - 1 
 
-    def pkt_loss_handler() -> None: 
+    def num_inflight(self) -> int:
         """
-        - sets wnd_size = cwnd = 1
-        - sends oldest transmitted-but-not-ACK'd packet
-        - resets packet loss timer 
+        precondition: lock is acquired by the calling thread
+        result: returns number of inflight packets 
         """
-        with lock: 
-            wnd_size = 1 
-            cwnd = 1
-            # timeout inflight packets
-            unsent_ind = acked_ind + 1
+        return self.unsent_ind - self.acked_ind - 1
 
-            # send oldest trans but not ACK'd packet
-            pkt = packets_to_send[unsent_ind]
-            sock.sendto(pkt.encode(), nemu_addr)
-            unsent_ind += 1
+    def pkt_loss_handler(self) -> None:
+        """ 
+        handles when a packet is lost (i.e. pkt loss timer expires)
+        """
+        with self.lock:
+            if self.done_data_trans_stage: 
+                return  # do nothing if finished data_trans stage
+            
+            # otherwise, update the window state and mark packets as lost
+            self.wnd_size = 1
+            self.cwnd = 1.0
+            self.unsent_ind = self.acked_ind + 1
 
-            # reset timer
-            pkt_loss_timer = Timer(pkt_loss_TO, pkt_loss_handler)
-            pkt_loss_timer.start()
+            # resend oldest un-ACK'd packet if it exists 
+            if self.unsent_ind < self.num_packets_to_send:
+                pkt = self.packets_to_send[self.unsent_ind]
+                self.sock.sendto(pkt.encode(), self.nemu_addr)
+                self.unsent_ind += 1
 
+            # reset the timer, cancelling previous one if it exists 
+            if self.pkt_loss_timer is not None:
+                self.pkt_loss_timer.cancel() 
+            self.pkt_loss_timer = Timer(self.pkt_loss_timeout, self.pkt_loss_handler)
+            self.pkt_loss_timer.start()
 
-    def sender() -> None: 
+    def send_loop(self) -> None:
         """
         keep trying to send the next unsent packet, if it exists
         """
-        while True: 
-            with lock: 
-                # if all packets are sent, terminate thread 
-                # since we are finished data-transmission stage
-                if acked_ind == num_packets_to_send-1: 
+        while True:
+            with self.lock:
+                if self.done_data_trans_stage:
                     return
 
-                # if available windowsize is too small, try sending later 
-                if num_inflight() >= cwnd: 
-                    time.sleep(0) # thread yield 
+                # check if all packets are ACKd, so finished data trans. stage
+                if self.acked_ind >= self.num_packets_to_send - 1:
+                    self.done_data_trans_stage = True
+                    return # terminate the thread 
+
+                # if there's no space in the window to send packets, wait
+                if self.num_inflight() >= self.wnd_size:
+                    time.sleep(0) # thread_yield 
                     continue
-                # otherwise, send the packet 
-                pkt = packets_to_send[unsent_ind]
-                unsent_ind += 1
-                sock.sendto(pkt.encode(), nemu_addr)
 
-                # start packetloss timer if not already started
-                if pkt_loss_timer is None: 
-                    pkt_loss_timer = Timer(pkt_loss_TO, pkt_loss_handler)
+                # otherwise, send a packet 
+                pkt = self.packets_to_send[self.unsent_ind]
+                self.unsent_ind += 1
+                self.sock.sendto(pkt.encode(), self.nemu_addr)
 
-    
-    def ack_handler() -> None: 
+                # and start the pkt_loss_timer if not already started
+                if self.pkt_loss_timer is None:
+                    self.pkt_loss_timer = Timer(self.pkt_loss_timeout, self.pkt_loss_handler)
+                    self.pkt_loss_timer.start()
+
+
+    def ack_loop(self) -> None:
+        """ 
+        handles ACK packets from nemulator 
         """
-        handle incoming ACK packets while we are still in data transmission
-        for ack_handler, this is iff we have un-ACKd packets in queue
-        """
-        while True: 
-            with lock: 
-                if acked_ind == num_packets_to_send-1: 
-                    # terminate thread, we are finished data-transmission stage
+        while True:
+            with self.lock:
+                # terminate thread if finished data-transmission stage
+                if self.done_data_trans_stage:
                     return
-                
-                # otherwise, listen for ACK packet 
-                recv_msg, _ = sock.recvfrom(1024) 
-                pkt = Packet(recv_msg) 
+                if self.acked_ind >= self.num_packets_to_send - 1:
+                    self.done_data_trans_stage = True
+                    return
 
-                # sender should only receive ACK packets in data-transmission
-                assert pkt.typ == utils.PACKET_TYPE_ACK
+            # wait for an ACK packet 
+            recv_msg, _ = self.sock.recvfrom(1024)
+            pkt = Packet(recv_msg)
+            assert pkt.typ != utils.PACKET_TYPE_ACK, "sender only expects ACK"
 
-                # ignore duplicate ACK (i.e. seqnum is outside inflight range)
-                acked_seqnum = (acked_ind + utils.MOD_SIZE) % utils.MOD_SIZE
+            with self.lock:
+                # check if ACK'd seqnum is in window of inflight packets
+                acked_seqnum = self.acked_ind % utils.MOD_SIZE
                 pkt_diff = utils.seqnum_diff(acked_seqnum, pkt.seqnum)
-                if pkt_diff > num_inflight() or pkt_diff == 0: 
-                    continue # wait for next packet 
-                
+                if pkt_diff == 0 or pkt_diff > self.num_inflight():
+                    continue # duplicate ACK, do nothing 
+
                 # otherwise, we received a new ACK. 
                 # 1. update cumulative ACK 
-                acked_ind += pkt_diff 
+                self.acked_ind += pkt_diff 
                 
                 # 2. restart/stop packet loss timer 
-                if num_inflight() == 0 and pkt_loss_timer is not None: 
-                    pkt_loss_timer = None
+                if self.num_inflight() == 0: 
+                    # stop timer if no inflight packets 
+                    if self.pkt_loss_timer is not None: 
+                        self.pkt_loss_timer.cancel()
+                        self.pkt_loss_timer = None
                 else: 
-
+                    # restart timer if inflight packets exist
+                    if self.pkt_loss_timer is not None:
+                        self.pkt_loss_timer.cancel()
+                    self.pkt_loss_timer = Timer(self.pkt_loss_timeout, self.pkt_loss_handler)
+                    self.pkt_loss_timer.start()
 
                 # 3. additive increase cwnd and N (i.e. wnd_size)
+                self.cwnd = self.cwnd + 1.0 / self.cwnd
+                self.wnd_size = min(10, max(1, floor(self.cwnd)))
+
                 # 4. update ecn_feedback variables and N
 
 
+    def run(self) -> None:
+        # Data transmission stage 
+        # we'll use 4 threads: 
+        # - sender thread that tries to send packets if window allows
+        # - receiver thread that handles incoming ACKs 
+        # - packet-drop timer to update window from packet drop 
+        # - ecn-feedback timer to update window using ce_count
 
-    Thread(target = sender).start()
+        sender_thread = Thread(target=self.send_loop)
+        ack_thread = Thread(target=self.ack_loop)
 
-    ################################
-    # Connection termination stage #
-    ################################
-    # send an EOT packet after all chunks are sent (assume it isn't lost)
-    sock.sendto(utils.EOT_PKT.encode(), nemu_addr)
+        sender_thread.start()
+        ack_thread.start()
 
-    # wait for EOT ack and close (do it in loop in case old acks arrive)
-    while True: 
-        eot_pkt, _ = sock.recvfrom(1024)
-        if Packet(eot_pkt).typ == utils.PACKET_TYPE_EOT: 
-            break  # will terminate assuming EOT is never lost
+        sender_thread.join()
+        ack_thread.join()
 
-    sock.close()
+        # Connection termination stage.
+        self.sock.sendto(utils.EOT_PKT.encode(), self.nemu_addr)
+
+        # loop incase of out-of-order ACKs 
+        while True:
+            eot_pkt, _ = self.sock.recvfrom(1024)
+            if Packet(eot_pkt).typ == utils.PACKET_TYPE_EOT:
+                break
+
+        with self.lock:
+            if self.pkt_loss_timer is not None:
+                self.pkt_loss_timer.cancel()
+                self.pkt_loss_timer = None
+        self.sock.close()
+
+
+def main() -> None:
+    args = parse_args()
+    sender = Sender(args)
+    sender.run()
 
 
 if __name__ == "__main__":
