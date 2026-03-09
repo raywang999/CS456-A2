@@ -213,12 +213,7 @@ class Sender:
         while True:
             with self.lock:
                 if self.done_data_trans_stage:
-                    return
-
-                # check if all packets are ACKd, so finished data trans. stage
-                if self.acked_ind >= self.num_packets_to_send - 1:
-                    self.done_data_trans_stage = True
-                    return # terminate the thread 
+                    return # terminate thread if done data-transmission stage
 
                 # wait if there's no space in the window to send packets
                 # or there's no packets left to send 
@@ -246,21 +241,22 @@ class Sender:
                 # terminate thread if finished data-transmission stage
                 if self.done_data_trans_stage:
                     return
+                # check if all packets are ACKd, so finished data trans. stage
                 if self.acked_ind >= self.num_packets_to_send - 1:
                     self.done_data_trans_stage = True
-                    return
+                    return # terminate the thread 
 
             # wait for an ACK packet 
             recv_msg, _ = self.sock.recvfrom(1024)
             pkt = Packet(recv_msg)
             assert pkt.typ == utils.PACKET_TYPE_ACK, "sender only expects ACK"
 
-            # update timestamp since event occurred 
-            self.timestamp += 1
-            # log to ack.log 
-            self.write_log(self.ack_log, f'{pkt.seqnum} {pkt.ce_count}')
+            with self.lock: 
+                # update timestamp since event occurred 
+                self.timestamp += 1
+                # log to ack.log 
+                self.write_log(self.ack_log, f'{pkt.seqnum} {pkt.ce_count}')
 
-            with self.lock:
                 # check if ACK'd seqnum is in window of inflight packets
                 acked_seqnum = self.acked_ind % utils.MOD_SIZE
                 pkt_diff = utils.seqnum_diff(acked_seqnum, pkt.seqnum)
