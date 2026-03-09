@@ -1,10 +1,12 @@
 import argparse
+import utils
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "emulator_host",
+        choices=utils.VALID_HOSTNAMES,
         help="hostname for the network emulator",
     )
     parser.add_argument(
@@ -26,6 +28,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    
 
 
 if __name__ == "__main__":
