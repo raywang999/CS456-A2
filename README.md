@@ -17,6 +17,19 @@ python3 receiver.py ubuntu2404-002.student.cs.uwaterloo.ca 6103 6104 output.txt
 python3 sender.py ubuntu2404-002.student.cs.uwaterloo.ca 6101 6102 input.txt
 ```
 
+# Direct sender <-> receiver (no emulator)
+- on the same machine (e.g. `ubuntu2404-002.student.cs.uwaterloo.ca`) run on 2 terminals:
+
+## Terminal 1: start receiver
+```bash
+python3 receiver.py localhost 6102 6103 output.txt
+```
+
+## Terminal 2: start sender
+```bash
+python3 sender.py localhost 6103 6102 lorem.txt
+```
+
 
 # Assumptions
 - For simplicity and more insightful logs, a "new packet" counts retransmissions as an event that updates timestamp.
